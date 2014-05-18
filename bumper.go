@@ -500,7 +500,7 @@ func ReadCertificates(dir string,
 
         cert, err := ReadCert(certpath, keypath)
         if err != nil {
-            logger.Printf("Skipping %s: can't parse certificate\n", file.Name())
+            logger.Printf("Skipping %s: can't parse cert\n", file.Name())
             continue
         }
         leaf := cert.Leaf
