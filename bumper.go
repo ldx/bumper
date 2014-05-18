@@ -368,16 +368,7 @@ func GetCertificate(
     cert, ok := certs[name]
     mutex.RUnlock()
     if ok {
-        // Verify certificate to make sure it is still valid.
-        pool := x509.NewCertPool()
-        pool.AddCert(cacert.Leaf)
-        _, err = cert.Leaf.Verify(x509.VerifyOptions{
-            DNSName: name,
-            Roots:   pool,
-        })
-        if err == nil {
-            return cert, nil
-        }
+        return cert, nil
     }
 
     // We have to create the certificate.
@@ -457,7 +448,25 @@ func GetCertificate(
     return cert, nil
 }
 
+func IsCertificateValid(ca, cert *tls.Certificate, name string) (valid bool) {
+    // Make sure certificate is still valid.
+    pool := x509.NewCertPool()
+    pool.AddCert(ca.Leaf)
+
+    _, err := cert.Leaf.Verify(x509.VerifyOptions{
+        DNSName: name,
+        Roots:   pool,
+    })
+
+    if err == nil {
+        return true
+    } else {
+        return false
+    }
+}
+
 func ReadCertificates(dir string,
+    cacert *tls.Certificate,
     certs map[string]*tls.Certificate) (err error) {
     // Open directory. If it does not exist, try to create it.
     directory, err := os.Open(dir)
@@ -506,11 +515,18 @@ func ReadCertificates(dir string,
         leaf := cert.Leaf
 
         if leaf.DNSNames != nil {
-            for j := range leaf.DNSNames {
-                logger.Printf("Found certificate for %s\n", leaf.DNSNames[j])
-                certs[leaf.DNSNames[j]] = cert
+            for _, name := range leaf.DNSNames {
+                if !IsCertificateValid(cacert, cert, name) {
+                    logger.Printf("Invalid cert for %s, removing\n", name)
+                    os.Remove(certpath)
+                    os.Remove(keypath)
+                    continue
+                }
+
+                logger.Printf("Found certificate for %s\n", name)
+                certs[name] = cert
             }
-        } else if leaf.RawSubject != nil {
+        } else if leaf.Subject.CommonName != "" {
             logger.Printf("Found certificate for %s\n",
                 leaf.Subject.CommonName)
             certs[string(leaf.Subject.CommonName)] = cert
@@ -575,7 +591,7 @@ func main() {
     bumper.certdir = opts.CertDir
 
     bumper.certs = make(map[string]*tls.Certificate)
-    err = ReadCertificates(opts.CertDir, bumper.certs)
+    err = ReadCertificates(bumper.certdir, &bumper.cacert, bumper.certs)
     if err != nil {
         logger.Printf("Error loading certificates from '%s': %s\n", opts.CertDir,
             err)
