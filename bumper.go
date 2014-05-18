@@ -207,7 +207,6 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
                 req.RequestURI)
             return
         }
-        orig_uri = ""
 
         resp, err := tr.RoundTrip(req)
         if err != nil {
