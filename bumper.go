@@ -138,13 +138,124 @@ func FixResponse(res *http.Response) (err error) {
     return nil
 }
 
+func SendResp(cli string, w io.Writer, code int, err string, nobody bool) {
+    var statusstr string
+    switch code {
+    case 100:
+        statusstr = "Continue"
+    case 101:
+        statusstr = "Switching Protocols"
+    case 200:
+        statusstr = "OK"
+    case 201:
+        statusstr = "Created"
+    case 202:
+        statusstr = "Accepted"
+    case 203:
+        statusstr = "Non-Authorative Information"
+    case 204:
+        statusstr = "No Content"
+    case 205:
+        statusstr = "Reset Content"
+    case 206:
+        statusstr = "Partial Content"
+    case 301:
+        statusstr = "Moved Permanently"
+    case 302:
+        statusstr = "Found"
+    case 303:
+        statusstr = "See Other"
+    case 307:
+        statusstr = "Temporary Redirect"
+    case 400:
+        statusstr = "Bad Request"
+    case 401:
+        statusstr = "Authorization Required"
+    case 402:
+        statusstr = "Payment Required"
+    case 403:
+        statusstr = "Forbidden"
+    case 404:
+        statusstr = "Not Found"
+    case 405:
+        statusstr = "Not Allowed"
+    case 406:
+        statusstr = "Not Acceptable"
+    case 408:
+        statusstr = "Request Timeout"
+    case 409:
+        statusstr = "Conflict"
+    case 410:
+        statusstr = "Gone"
+    case 411:
+        statusstr = "Length Required"
+    case 412:
+        statusstr = "Precondition Failed"
+    case 413:
+        statusstr = "Request Entity Too Large"
+    case 414:
+        statusstr = "Request-URI Too Large"
+    case 415:
+        statusstr = "Unsupported Media Type"
+    case 416:
+        statusstr = "Requested Range Not Satisfiable"
+    case 500:
+        statusstr = "Internal Server Error"
+    case 501:
+        statusstr = "Not Implemented"
+    case 502:
+        statusstr = "Bad Gateway"
+    case 503:
+        statusstr = "Service Temporarily Unavailable"
+    default:
+        logger.Printf("Warning: got invalid HTTP status code %d\n", code)
+        return
+    }
+
+    status := fmt.Sprintf("%d %s", code, statusstr)
+
+    var body string
+    if nobody {
+        body = ""
+    } else {
+        body = fmt.Sprintf("<html><head><title>%s</title>\n"+
+            "<body>\n"+
+            "<h1>%s</h1>\n"+
+            "%s\n"+
+            "</body>\n"+
+            "</html>\n",
+            status, status, err)
+    }
+
+    resp := http.Response{
+        Status:        status,
+        StatusCode:    code,
+        Proto:         "HTTP/1.0",
+        ProtoMajor:    1,
+        ProtoMinor:    0,
+        Body:          ioutil.NopCloser(bytes.NewBufferString(body)),
+        ContentLength: int64(len(body)),
+        Close:         true,
+        Request:       nil,
+        Header:        make(map[string][]string),
+    }
+    resp.Header.Set("Content-Type", "text/html; charset=UTF-8")
+    resp.Header.Set("Content-Length", string(len(body)))
+    resp.Header.Set("Date", time.Now().Format(http.TimeFormat))
+    resp.Header.Set("Server", "BumperProxy")
+
+    resp.Write(w)
+
+    logger.Printf("(%s) <- %s\n", cli, status)
+}
+
 //
 // Goroutine handling a client, proxying requests and responses.
 //
 func HandleClient(conn net.Conn, bumper *BumperProxy) {
     defer conn.Close()
 
-    cli := conn.RemoteAddr()
+    cli := conn.RemoteAddr().String()
 
     reader := bufio.NewReader(conn)
     writer := io.Writer(conn)
@@ -165,12 +276,10 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
         logger.Printf("(%s) -> %s %s\n", cli, req.Method, req.RequestURI)
         //req.Write(os.Stdout)
 
-        proto := req.Proto
-
         if req.Method == "CONNECT" {
             if !strings.Contains(req.Host, ":") {
-                writer.Write([]byte(fmt.Sprintf(
-                    "%s 400 Invalid Request\r\n\r\n", proto)))
+                SendResp(cli, writer, 400,
+                    fmt.Sprintf("invalid host '%s'", req.Host), false)
                 return
             }
             host := strings.Split(req.Host, ":")[0]
@@ -180,12 +289,12 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
                 bumper.certdir)
             if err != nil {
                 logger.Printf("(%s) error getting new cert: %s\n", cli, err)
+                SendResp(cli, writer, 500, err.Error(), false)
                 return
             }
 
             // Okay, we are ready to start TLS.
-            writer.Write([]byte(fmt.Sprintf("%s 200 OK\r\n\r\n", proto)))
-            logger.Printf("(%s) <- 200 %s\n", cli, req.RequestURI)
+            SendResp(cli, writer, 200, "", true)
 
             tlsconn, err := StartTls(conn, cert)
             if err != nil {
@@ -210,17 +319,14 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 
         resp, err := tr.RoundTrip(req)
         if err != nil {
-            logger.Printf("(%s) error proxying %s: %s\n", cli, req, err)
-            writer.Write([]byte(fmt.Sprintf(
-                "%s 400 Bad Request %s\r\n\r\n", proto, err)))
+            SendResp(cli, writer, 400, err.Error(), false)
             return
         }
 
         if FixResponse(resp) != nil {
             logger.Printf("(%s) error fixing Content-Lenght for %s: %s\n",
                 cli, req, err)
-            writer.Write([]byte(fmt.Sprintf(
-                "%s 500 Internal Server Error %s\r\n\r\n", proto, err)))
+            SendResp(cli, writer, 500, err.Error(), false)
             return
         }
 
