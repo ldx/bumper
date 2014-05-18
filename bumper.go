@@ -21,6 +21,7 @@ import (
     "net/url"
     "os"
     "strings"
+    "sync"
     "time"
 )
 
@@ -35,6 +36,7 @@ var logger *log.Logger
 type BumperProxy struct {
     cacert  tls.Certificate
     certs   map[string]*tls.Certificate
+    mutex   *sync.RWMutex
     certdir string
 }
 
@@ -286,7 +288,7 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 
             // Retrieve or create fake certificate for 'host'.
             cert, err := GetCertificate(host, &bumper.cacert, bumper.certs,
-                bumper.certdir)
+                bumper.mutex, bumper.certdir)
             if err != nil {
                 logger.Printf("(%s) error getting new cert: %s\n", cli, err)
                 SendResp(cli, writer, 500, err.Error(), false)
@@ -359,9 +361,13 @@ func GetCertificate(
     name string,
     cacert *tls.Certificate,
     certs map[string]*tls.Certificate,
+    mutex *sync.RWMutex,
     certdir string) (cert *tls.Certificate, err error) {
     // Check if we have the certificate for the server in our map.
-    if cert, ok := certs[name]; ok {
+    mutex.RLock()
+    cert, ok := certs[name]
+    mutex.RUnlock()
+    if ok {
         // Verify certificate to make sure it is still valid.
         pool := x509.NewCertPool()
         pool.AddCert(cacert.Leaf)
@@ -444,7 +450,10 @@ func GetCertificate(
 
     logger.Printf("Created certificate for %s\n", name)
 
+    mutex.Lock()
     certs[name] = cert
+    mutex.Unlock()
+
     return cert, nil
 }
 
@@ -572,6 +581,8 @@ func main() {
             err)
         os.Exit(1)
     }
+
+    bumper.mutex = new(sync.RWMutex)
 
     Loop(opts.Listen, bumper)
 }
