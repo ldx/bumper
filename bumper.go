@@ -41,6 +41,7 @@ type BumperProxy struct {
     maxserial  int64
     proxy      string
     skipverify bool
+    addorig    bool
 }
 
 type lengthFixReadCloser struct {
@@ -71,7 +72,7 @@ func Loop(addr string, bumper *BumperProxy) {
     }
 }
 
-func FixRequest(req *http.Request, orig_uri string) (err error) {
+func FixRequest(req *http.Request, orig_uri string, addhdr bool) (err error) {
     if orig_uri != "" {
         uri, err := url.Parse("https://" + orig_uri + req.RequestURI)
         if err != nil {
@@ -81,6 +82,8 @@ func FixRequest(req *http.Request, orig_uri string) (err error) {
         req.URL = uri
         req.RequestURI = ""
     }
+
+    req.Header.Set("X-Orig-Uri", req.URL.String())
 
     keepalive := req.Header.Get("Proxy-Connection")
     if keepalive != "" {
@@ -331,7 +334,7 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
             continue
         }
 
-        if FixRequest(req, orig_uri) != nil {
+        if FixRequest(req, orig_uri, bumper.addorig) != nil {
             logger.Printf("(%s) invalid request URI %s\n", cli,
                 req.RequestURI)
             return
@@ -587,13 +590,14 @@ func ReadCert(certpath, keypath string) (cert *tls.Certificate,
 // Command line options.
 //
 var opts struct {
-    CertDir    string `short:"d" long:"certdir" value-name:"<directory>" description:"Directory where generated certificates are stored." required:"true"`
-    CaCert     string `short:"c" long:"cacert" value-name:"<file>" description:"CA certificate file." required:"true"`
-    CaKey      string `short:"k" long:"cakey" value-name:"<file>" description:"CA private key file." required:"true"`
-    Proxy      string `short:"p" long:"proxy" value-name:"<host:port>" description:"HTTP parent proxy to use for all requests (both HTTP and HTTPS)."`
-    SkipVerify bool   `short:"n" long:"skipverify" description:"If set, BumperProxy will not verify the certificate of HTTPS websites." default:"false"`
-    Listen     string `short:"l" long:"listen" value-name:"<host:port>" description:"Host and port where Bumperproxy will be listening." default:"localhost:9718"`
-    Verbose    []bool `short:"v" long:"verbose" description:"Enable verbose debugging."`
+    CertDir     string `short:"d" long:"certdir" value-name:"<directory>" description:"Directory where generated certificates are stored." required:"true"`
+    CaCert      string `short:"c" long:"cacert" value-name:"<file>" description:"CA certificate file." required:"true"`
+    CaKey       string `short:"k" long:"cakey" value-name:"<file>" description:"CA private key file." required:"true"`
+    Proxy       string `short:"p" long:"proxy" value-name:"<host:port>" description:"HTTP parent proxy to use for all requests (both HTTP and HTTPS)."`
+    SkipVerify  bool   `short:"n" long:"skipverify" description:"If set, BumperProxy will not verify the certificate of HTTPS websites." default:"false"`
+    Listen      string `short:"l" long:"listen" value-name:"<host:port>" description:"Host and port where Bumperproxy will be listening." default:"localhost:9718"`
+    AddXOrigUri bool   `short:"x" long:"addxoriguri" description:"If set, BumperProxy will add an X-Orig-Uri header with the original URI to requests." default:"false"`
+    Verbose     []bool `short:"v" long:"verbose" description:"Enable verbose debugging."`
 }
 
 func main() {
@@ -611,6 +615,7 @@ func main() {
     bumper := new(BumperProxy)
 
     bumper.proxy = opts.Proxy
+    bumper.addorig = opts.AddXOrigUri
     bumper.skipverify = opts.SkipVerify
 
     // Load CA certificate and key.
