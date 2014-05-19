@@ -34,12 +34,13 @@ var logger *log.Logger
 // This holds all the certificate information for Bumper.
 //
 type BumperProxy struct {
-    cacert    tls.Certificate
-    certs     map[string]*tls.Certificate
-    mutex     *sync.RWMutex
-    certdir   string
-    maxserial int64
-    proxy     string
+    cacert     tls.Certificate
+    certs      map[string]*tls.Certificate
+    mutex      *sync.RWMutex
+    certdir    string
+    maxserial  int64
+    proxy      string
+    skipverify bool
 }
 
 type lengthFixReadCloser struct {
@@ -272,6 +273,9 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 
     tr := &http.Transport{
         Proxy: proxy,
+        TLSClientConfig: &tls.Config{
+            InsecureSkipVerify: bumper.skipverify,
+        },
     }
 
     cli := conn.RemoteAddr().String()
@@ -583,12 +587,13 @@ func ReadCert(certpath, keypath string) (cert *tls.Certificate,
 // Command line options.
 //
 var opts struct {
-    CertDir string `short:"d" long:"certdir" value-name:"<directory>" description:"Directory where generated certificates are stored." required:"true"`
-    CaCert  string `short:"c" long:"cacert" value-name:"<file>" description:"CA certificate file." required:"true"`
-    CaKey   string `short:"k" long:"cakey" value-name:"<file>" description:"CA private key file." required:"true"`
-    Proxy   string `short:"p" long:"proxy" value-name:"<host:port>" description:"HTTP parent proxy to use for all requests (both HTTP and HTTPS)."`
-    Listen  string `short:"l" long:"listen" value-name:"<host:port>" description:"Host and port where Bumperproxy will be listening." default:"localhost:9718"`
-    Verbose []bool `short:"v" long:"verbose" description:"Enable verbose debugging."`
+    CertDir    string `short:"d" long:"certdir" value-name:"<directory>" description:"Directory where generated certificates are stored." required:"true"`
+    CaCert     string `short:"c" long:"cacert" value-name:"<file>" description:"CA certificate file." required:"true"`
+    CaKey      string `short:"k" long:"cakey" value-name:"<file>" description:"CA private key file." required:"true"`
+    Proxy      string `short:"p" long:"proxy" value-name:"<host:port>" description:"HTTP parent proxy to use for all requests (both HTTP and HTTPS)."`
+    SkipVerify bool   `short:"n" long:"skipverify" description:"If set, BumperProxy will not verify the certificate of HTTPS websites." default:"false"`
+    Listen     string `short:"l" long:"listen" value-name:"<host:port>" description:"Host and port where Bumperproxy will be listening." default:"localhost:9718"`
+    Verbose    []bool `short:"v" long:"verbose" description:"Enable verbose debugging."`
 }
 
 func main() {
@@ -606,6 +611,7 @@ func main() {
     bumper := new(BumperProxy)
 
     bumper.proxy = opts.Proxy
+    bumper.skipverify = opts.SkipVerify
 
     // Load CA certificate and key.
     cacert, err := ReadCert(opts.CaCert, opts.CaKey)
