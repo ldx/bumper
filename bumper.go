@@ -34,10 +34,11 @@ var logger *log.Logger
 // This holds all the certificate information for Bumper.
 //
 type BumperProxy struct {
-    cacert  tls.Certificate
-    certs   map[string]*tls.Certificate
-    mutex   *sync.RWMutex
-    certdir string
+    cacert    tls.Certificate
+    certs     map[string]*tls.Certificate
+    mutex     *sync.RWMutex
+    certdir   string
+    maxserial int64
 }
 
 type lengthFixReadCloser struct {
@@ -287,8 +288,7 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
             host := strings.Split(req.Host, ":")[0]
 
             // Retrieve or create fake certificate for 'host'.
-            cert, err := GetCertificate(host, &bumper.cacert, bumper.certs,
-                bumper.mutex, bumper.certdir)
+            cert, err := GetCertificate(host, bumper)
             if err != nil {
                 logger.Printf("(%s) error getting new cert: %s\n", cli, err)
                 SendResp(cli, writer, 500, err.Error(), false)
@@ -357,16 +357,12 @@ func StartTls(conn net.Conn, cert *tls.Certificate) (tlsconn *tls.Conn,
     return tlsconn, nil
 }
 
-func GetCertificate(
-    name string,
-    cacert *tls.Certificate,
-    certs map[string]*tls.Certificate,
-    mutex *sync.RWMutex,
-    certdir string) (cert *tls.Certificate, err error) {
+func GetCertificate(name string, bumper *BumperProxy) (cert *tls.Certificate,
+    err error) {
     // Check if we have the certificate for the server in our map.
-    mutex.RLock()
-    cert, ok := certs[name]
-    mutex.RUnlock()
+    bumper.mutex.RLock()
+    cert, ok := bumper.certs[name]
+    bumper.mutex.RUnlock()
     if ok {
         return cert, nil
     }
@@ -378,6 +374,11 @@ func GetCertificate(
     }
     privkey := x509.MarshalPKCS1PrivateKey(key)
 
+    bumper.mutex.Lock()
+    bumper.maxserial++
+    serial := bumper.maxserial
+    bumper.mutex.Unlock()
+
     dercert, err := x509.CreateCertificate(
         rand.Reader,
         &x509.Certificate{
@@ -387,13 +388,13 @@ func GetCertificate(
             },
             KeyUsage: (x509.KeyUsageDigitalSignature |
                 x509.KeyUsageKeyEncipherment),
-            SerialNumber: big.NewInt(1),
+            SerialNumber: big.NewInt(serial),
             NotAfter:     time.Now().AddDate(10, 0, 0).UTC(),
             NotBefore:    time.Now().AddDate(-10, 0, 0).UTC(),
         },
-        cacert.Leaf,
+        bumper.cacert.Leaf,
         &key.PublicKey,
-        cacert.PrivateKey)
+        bumper.cacert.PrivateKey)
     if err != nil {
         return nil, errors.New("Certificate generation failed")
     }
@@ -416,7 +417,7 @@ func GetCertificate(
     }
     cert = &crt
 
-    path := fmt.Sprintf("%s%c%s.crt", certdir, os.PathSeparator, name)
+    path := fmt.Sprintf("%s%c%s.crt", bumper.certdir, os.PathSeparator, name)
     certfile, err := os.Create(path)
     if err != nil {
         return nil, errors.New(
@@ -427,7 +428,7 @@ func GetCertificate(
         Bytes: dercert})
     certfile.Close()
 
-    path = fmt.Sprintf("%s%c%s.key", certdir, os.PathSeparator, name)
+    path = fmt.Sprintf("%s%c%s.key", bumper.certdir, os.PathSeparator, name)
     keyfile, err := os.Create(path)
     if err != nil {
         return nil, errors.New(
@@ -441,9 +442,9 @@ func GetCertificate(
 
     logger.Printf("Created certificate for %s\n", name)
 
-    mutex.Lock()
-    certs[name] = cert
-    mutex.Unlock()
+    bumper.mutex.Lock()
+    bumper.certs[name] = cert
+    bumper.mutex.Unlock()
 
     return cert, nil
 }
@@ -467,7 +468,8 @@ func IsCertificateValid(ca, cert *tls.Certificate, name string) (valid bool) {
 
 func ReadCertificates(dir string,
     cacert *tls.Certificate,
-    certs map[string]*tls.Certificate) (err error) {
+    certs map[string]*tls.Certificate,
+    maxserial *int64) (err error) {
     // Open directory. If it does not exist, try to create it.
     directory, err := os.Open(dir)
     if err != nil {
@@ -486,6 +488,8 @@ func ReadCertificates(dir string,
         }
     }
     defer directory.Close()
+
+    *maxserial = 1 // 1 is the CA certificate
 
     files, err := directory.Readdir(0)
     if err != nil {
@@ -523,13 +527,20 @@ func ReadCertificates(dir string,
                     continue
                 }
 
-                logger.Printf("Found certificate for %s\n", name)
+                logger.Printf("Found certificate for %s (#%d)\n", name,
+                    leaf.Subject.CommonName, leaf.SerialNumber)
                 certs[name] = cert
+                if leaf.SerialNumber.Int64() > *maxserial {
+                    *maxserial = leaf.SerialNumber.Int64()
+                }
             }
         } else if leaf.Subject.CommonName != "" {
-            logger.Printf("Found certificate for %s\n",
-                leaf.Subject.CommonName)
+            logger.Printf("Found certificate for %s (#%d)\n",
+                leaf.Subject.CommonName, leaf.SerialNumber)
             certs[string(leaf.Subject.CommonName)] = cert
+            if leaf.SerialNumber.Int64() > *maxserial {
+                *maxserial = leaf.SerialNumber.Int64()
+            }
         }
     }
 
@@ -591,7 +602,8 @@ func main() {
     bumper.certdir = opts.CertDir
 
     bumper.certs = make(map[string]*tls.Certificate)
-    err = ReadCertificates(bumper.certdir, &bumper.cacert, bumper.certs)
+    err = ReadCertificates(bumper.certdir, &bumper.cacert, bumper.certs,
+        &bumper.maxserial)
     if err != nil {
         logger.Printf("Error loading certificates from '%s': %s\n", opts.CertDir,
             err)
