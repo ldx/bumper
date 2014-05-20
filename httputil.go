@@ -27,7 +27,9 @@ func FixRequest(req *http.Request, orig_uri string, addhdr bool) (err error) {
         req.RequestURI = ""
     }
 
-    req.Header.Set("X-Orig-Uri", req.URL.String())
+    if addhdr {
+        req.Header.Set("X-Orig-Uri", req.URL.String())
+    }
 
     keepalive := req.Header.Get("Proxy-Connection")
     if keepalive != "" {
