@@ -52,6 +52,12 @@ func GetCertificate(name string, bumper *BumperProxy) (cert *tls.Certificate,
     serial := bumper.maxserial
     bumper.mutex.Unlock()
 
+    var ipaddrs = []net.IP{}
+    ipaddr := net.ParseIP(name)
+    if ipaddr != nil {
+        ipaddrs = []net.IP{ipaddr}
+    }
+
     dercert, err := x509.CreateCertificate(
         rand.Reader,
         &x509.Certificate{
@@ -64,6 +70,7 @@ func GetCertificate(name string, bumper *BumperProxy) (cert *tls.Certificate,
             SerialNumber: big.NewInt(serial),
             NotAfter:     time.Now().AddDate(10, 0, 0).UTC(),
             NotBefore:    time.Now().AddDate(-10, 0, 0).UTC(),
+            IPAddresses:  ipaddrs,
         },
         bumper.cacert.Leaf,
         &key.PublicKey,
