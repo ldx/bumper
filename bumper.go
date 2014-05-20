@@ -26,11 +26,6 @@ import (
 )
 
 //
-// Global variables.
-//
-var logger *log.Logger
-
-//
 // This holds all the certificate information for Bumper.
 //
 type BumperProxy struct {
@@ -53,18 +48,18 @@ type lengthFixReadCloser struct {
 // Main listener loop.
 //
 func Loop(addr string, bumper *BumperProxy) {
-    logger.Printf("Starting listener on %s\n", addr)
+    log.Printf("Starting listener on %s\n", addr)
 
     srv, err := net.Listen("tcp", addr)
     if err != nil {
-        logger.Printf("Can't start listener on %s: %s\n", addr, err)
+        log.Printf("Can't start listener on %s: %s\n", addr, err)
         os.Exit(1)
     }
 
     for {
         conn, err := srv.Accept()
         if err != nil {
-            logger.Printf("Warning: accepting client: %s\n", err)
+            log.Printf("Warning: accepting client: %s\n", err)
             continue
         }
 
@@ -216,7 +211,7 @@ func SendResp(cli string, w io.Writer, code int, err string, nobody bool) {
     case 503:
         statusstr = "Service Temporarily Unavailable"
     default:
-        logger.Printf("Warning: got invalid HTTP status code %d\n", code)
+        log.Printf("Warning: got invalid HTTP status code %d\n", code)
         return
     }
 
@@ -254,7 +249,7 @@ func SendResp(cli string, w io.Writer, code int, err string, nobody bool) {
 
     resp.Write(w)
 
-    logger.Printf("(%s) <- %s\n", cli, status)
+    log.Printf("(%s) <- %s\n", cli, status)
 }
 
 //
@@ -267,7 +262,7 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
     if bumper.proxy != "" {
         proxyurl, err := url.Parse("http://" + bumper.proxy)
         if err != nil {
-            logger.Printf("Setting parent proxy to %s: %s\n",
+            log.Printf("Setting parent proxy to %s: %s\n",
                 bumper.proxy, err)
             return
         }
@@ -290,14 +285,14 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
     for {
         req, err := http.ReadRequest(reader)
         if err == io.EOF {
-            logger.Printf("(%s) client closed connection\n", cli)
+            log.Printf("(%s) client closed connection\n", cli)
             return
         } else if err != nil {
-            logger.Printf("(%s) error reading request: %s\n", cli, err)
+            log.Printf("(%s) error reading request: %s\n", cli, err)
             return
         }
 
-        logger.Printf("(%s) -> %s %s\n", cli, req.Method, req.RequestURI)
+        log.Printf("(%s) -> %s %s\n", cli, req.Method, req.RequestURI)
         //req.Write(os.Stdout)
 
         if req.Method == "CONNECT" {
@@ -311,7 +306,7 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
             // Retrieve or create fake certificate for 'host'.
             cert, err := GetCertificate(host, bumper)
             if err != nil {
-                logger.Printf("(%s) error getting new cert: %s\n", cli, err)
+                log.Printf("(%s) error getting new cert: %s\n", cli, err)
                 SendResp(cli, writer, 500, err.Error(), false)
                 return
             }
@@ -321,7 +316,7 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 
             tlsconn, err := StartTls(conn, cert)
             if err != nil {
-                logger.Printf("(%s) error starting TLS: %s\n", cli, err)
+                log.Printf("(%s) error starting TLS: %s\n", cli, err)
                 return
             }
             defer tlsconn.Close()
@@ -335,7 +330,7 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
         }
 
         if FixRequest(req, orig_uri, bumper.addorig) != nil {
-            logger.Printf("(%s) invalid request URI %s\n", cli,
+            log.Printf("(%s) invalid request URI %s\n", cli,
                 req.RequestURI)
             return
         }
@@ -351,7 +346,7 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
         }
 
         if FixResponse(resp) != nil {
-            logger.Printf("(%s) error fixing Content-Lenght for %s: %s\n",
+            log.Printf("(%s) error fixing Content-Lenght for %s: %s\n",
                 cli, req, err)
             SendResp(cli, writer, 500, err.Error(), false)
             return
@@ -359,11 +354,11 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 
         resp.Write(writer)
 
-        logger.Printf("(%s) <- %s %s\n", cli, resp.Status, req.URL)
+        log.Printf("(%s) <- %s %s\n", cli, resp.Status, req.URL)
         //resp.Write(os.Stdout)
 
         if req.Close || resp.Close {
-            logger.Printf("(%s) closing connection\n", cli)
+            log.Printf("(%s) closing connection\n", cli)
             return
         }
     }
@@ -465,7 +460,7 @@ func GetCertificate(name string, bumper *BumperProxy) (cert *tls.Certificate,
     })
     keyfile.Close()
 
-    logger.Printf("Created certificate for %s\n", name)
+    log.Printf("Created certificate for %s\n", name)
 
     bumper.mutex.Lock()
     bumper.certs[name] = cert
@@ -500,14 +495,14 @@ func ReadCertificates(dir string,
     if err != nil {
         err = os.Mkdir(dir, 0755)
         if err != nil {
-            logger.Printf("Error opening certificate directory %s: %s\n", dir,
+            log.Printf("Error opening certificate directory %s: %s\n", dir,
                 err)
             return err
         }
 
         directory, err = os.Open(dir)
         if err != nil {
-            logger.Printf("Error opening certificate directory %s: %s\n", dir,
+            log.Printf("Error opening certificate directory %s: %s\n", dir,
                 err)
             return err
         }
@@ -518,7 +513,7 @@ func ReadCertificates(dir string,
 
     files, err := directory.Readdir(0)
     if err != nil {
-        logger.Printf("Error opening certificate directory %s: %s\n", dir, err)
+        log.Printf("Error opening certificate directory %s: %s\n", dir, err)
         return err
     }
 
@@ -538,7 +533,7 @@ func ReadCertificates(dir string,
 
         cert, err := ReadCert(certpath, keypath)
         if err != nil {
-            logger.Printf("Skipping %s: can't parse cert\n", file.Name())
+            log.Printf("Skipping %s: can't parse cert\n", file.Name())
             continue
         }
         leaf := cert.Leaf
@@ -546,13 +541,13 @@ func ReadCertificates(dir string,
         if leaf.DNSNames != nil {
             for _, name := range leaf.DNSNames {
                 if !IsCertificateValid(cacert, cert, name) {
-                    logger.Printf("Invalid cert for %s, removing\n", name)
+                    log.Printf("Invalid cert for %s, removing\n", name)
                     os.Remove(certpath)
                     os.Remove(keypath)
                     continue
                 }
 
-                logger.Printf("Found certificate for %s (#%d)\n", name,
+                log.Printf("Found certificate for %s (#%d)\n", name,
                     leaf.Subject.CommonName, leaf.SerialNumber)
                 certs[name] = cert
                 if leaf.SerialNumber.Int64() > *maxserial {
@@ -560,7 +555,7 @@ func ReadCertificates(dir string,
                 }
             }
         } else if leaf.Subject.CommonName != "" {
-            logger.Printf("Found certificate for %s (#%d)\n",
+            log.Printf("Found certificate for %s (#%d)\n",
                 leaf.Subject.CommonName, leaf.SerialNumber)
             certs[string(leaf.Subject.CommonName)] = cert
             if leaf.SerialNumber.Int64() > *maxserial {
@@ -614,7 +609,8 @@ func main() {
         }
     }
 
-    logger = log.New(os.Stdout, "[bumper] ", 0)
+    log.SetOutput(os.Stdout)
+    log.SetPrefix("[bumper] ")
 
     bumper := new(BumperProxy)
 
@@ -625,7 +621,7 @@ func main() {
     // Load CA certificate and key.
     cacert, err := ReadCert(opts.CaCert, opts.CaKey)
     if err != nil {
-        logger.Printf("%s\n", err)
+        log.Printf("%s\n", err)
         os.Exit(1)
     }
     bumper.cacert = *cacert
@@ -637,7 +633,7 @@ func main() {
     err = ReadCertificates(bumper.certdir, &bumper.cacert, bumper.certs,
         &bumper.maxserial)
     if err != nil {
-        logger.Printf("Error loading certificates from '%s': %s\n", opts.CertDir,
+        log.Printf("Error loading certificates from '%s': %s\n", opts.CertDir,
             err)
         os.Exit(1)
     }
