@@ -342,7 +342,11 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 
         resp, err := tr.RoundTrip(req)
         if err != nil {
-            SendResp(cli, writer, 400, err.Error(), false)
+            statuscode := 502
+            if resp != nil {
+                statuscode = resp.StatusCode
+            }
+            SendResp(cli, writer, statuscode, err.Error(), false)
             return
         }
 
