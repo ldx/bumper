@@ -188,7 +188,7 @@ func main() {
         }
     }
 
-    log.SetOutput(os.Stdout)
+    //log.SetOutput(os.Stdout)
     log.SetPrefix("[bumper] ")
 
     bumper := new(BumperProxy)
