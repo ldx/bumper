@@ -3,6 +3,7 @@ package main
 import (
     "crypto/rand"
     "crypto/rsa"
+    _ "crypto/sha512"
     "crypto/tls"
     "crypto/x509"
     "crypto/x509/pkix"
