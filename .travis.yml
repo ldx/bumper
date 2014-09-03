@@ -13,7 +13,7 @@ after_success:
 deploy:
   provider: releases
   api-key: "$API_KEY"
-  file: bumper
+  file: "$TRAVIS_BUILD_DIR/bumper"
 
 env:
   global:
