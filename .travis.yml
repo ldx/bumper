@@ -17,4 +17,4 @@ deploy:
 env:
   global:
     - ARTIFACT=bumper.tar.gz
-    - secure: "P1Nq+PD79mREf0YnWI0hw/gDqYwilQ8mqLRJlbrfROBCIkQL7oE73pjfsfW8VhgCL1ZtiXhQw+JKzSt9EvnH9R8GLU3sZpO9Yzmlip42iWEQBYkGbUY9VY1TsRU5Eks714jjYLPBorZ8LjFGxS0TGJ1E5KI2kxAyHy9auiOgcMg="
+    - secure: "b5U+LPExdvl+LCn63BTT6ET8ge6HQVmfRqO1jNJoNS7Fhn+80+ZJCjSodxU1coqRWkDlhs3rOoO6xk8JjNfncFcoHHEUgvVnDq0T2/+T0TudkQH3uTwCm7cCSmn/TXaVRH0Gqe03mi4JYi/RmbOQCGhSyzmBjbg4oDwjMLpaxsg="
