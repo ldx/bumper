@@ -4,3 +4,12 @@ go:
   - 1.1
   - 1.2
   - tip
+
+deploy:
+  provider: releases
+  api-key: "$API_KEY"
+  file: bumper
+
+env:
+  global:
+    - secure: "P1Nq+PD79mREf0YnWI0hw/gDqYwilQ8mqLRJlbrfROBCIkQL7oE73pjfsfW8VhgCL1ZtiXhQw+JKzSt9EvnH9R8GLU3sZpO9Yzmlip42iWEQBYkGbUY9VY1TsRU5Eks714jjYLPBorZ8LjFGxS0TGJ1E5KI2kxAyHy9auiOgcMg="
