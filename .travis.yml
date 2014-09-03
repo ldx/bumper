@@ -9,6 +9,7 @@ deploy:
   provider: releases
   api-key: "$API_KEY"
   file: bumper
+  release-number: "$TRAVIS_BUILD_NUMBER-$TRAVIS_GO_VERSION"
 
 env:
   global:
