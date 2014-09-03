@@ -16,5 +16,5 @@ deploy:
 
 env:
   global:
-    - ARTIFACT=bumper.tar.gz
+    - ARTIFACT=/tmp/bumper.tar.gz
     - secure: "b5U+LPExdvl+LCn63BTT6ET8ge6HQVmfRqO1jNJoNS7Fhn+80+ZJCjSodxU1coqRWkDlhs3rOoO6xk8JjNfncFcoHHEUgvVnDq0T2/+T0TudkQH3uTwCm7cCSmn/TXaVRH0Gqe03mi4JYi/RmbOQCGhSyzmBjbg4oDwjMLpaxsg="
