@@ -7,13 +7,13 @@ go:
 
 after_success:
   - go build
-  - ls -l
+  - ls -l; echo $TRAVIS_BUILD_DIR; pwd
   - git tag "$TRAVIS_BUILD_NUMBER-$TRAVIS_GO_VERSION"
 
 deploy:
   provider: releases
   api-key: "$API_KEY"
-  file: "$TRAVIS_BUILD_DIR/bumper"
+  file: "$(pwd)/bumper"
 
 env:
   global:
