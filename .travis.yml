@@ -5,11 +5,13 @@ go:
   - 1.2
   - tip
 
+after_success:
+  - git tag "$TRAVIS_BUILD_NUMBER-$TRAVIS_GO_VERSION"
+
 deploy:
   provider: releases
   api-key: "$API_KEY"
   file: bumper
-  release-number: "$TRAVIS_BUILD_NUMBER-$TRAVIS_GO_VERSION"
 
 env:
   global:
