@@ -7,6 +7,7 @@ go:
 
 after_success:
   - go build
+  - ls -l
   - git tag "$TRAVIS_BUILD_NUMBER-$TRAVIS_GO_VERSION"
 
 deploy:
