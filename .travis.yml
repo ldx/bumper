@@ -1,14 +1,12 @@
 language: go
 
 go:
-  - 1.1
   - 1.2
-  - tip
 
 after_success:
   - go build
   - tar cvzf "$ARTIFACT" bumper
-  - git tag "$TRAVIS_BUILD_NUMBER-$TRAVIS_GO_VERSION"
+  - git tag "$TRAVIS_BUILD_NUMBER"
 
 deploy:
   provider: releases
