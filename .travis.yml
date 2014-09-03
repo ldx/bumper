@@ -6,6 +6,7 @@ go:
   - tip
 
 after_success:
+  - go build
   - git tag "$TRAVIS_BUILD_NUMBER-$TRAVIS_GO_VERSION"
 
 deploy:
