@@ -170,8 +170,6 @@ func ReadCertificates(dir string,
 	}
 	defer directory.Close()
 
-	*maxserial = 1 // 1 is the CA certificate
-
 	files, err := directory.Readdir(0)
 	if err != nil {
 		log.Printf("Error opening certificate directory %s: %s\n", dir, err)

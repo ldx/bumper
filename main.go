@@ -205,6 +205,9 @@ func main() {
 	}
 	bumper.cacert = *cacert
 
+	// First serial is the CA's.
+	bumper.maxserial = bumper.cacert.Leaf.SerialNumber.Int64()
+
 	// Load server certificates.
 	bumper.certdir = opts.CertDir
 
