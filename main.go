@@ -220,10 +220,19 @@ var opts struct {
 	Listen      string `short:"l" long:"listen" value-name:"<host:port>" description:"Host and port where Bumperproxy will be listening." default:"localhost:9718"`
 	AddXOrigUri bool   `short:"x" long:"addxoriguri" description:"If set, BumperProxy will add an X-Orig-Uri header with the original URI to requests." default:"false"`
 	Verbose     []bool `short:"v" long:"verbose" description:"Enable verbose debugging."`
+	Version     bool   `short:"V" long:"version" description:"Show version."`
 }
+
+var version string
 
 func main() {
 	args, err := flags.Parse(&opts)
+	if opts.Version {
+		if version == "" {
+			version = "unknown"
+		}
+		fmt.Printf("Bumper version %s\n", version)
+	}
 	if err != nil {
 		if len(args) == 1 && args[0] == "--help" {
 			os.Exit(0)

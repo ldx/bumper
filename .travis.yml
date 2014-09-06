@@ -3,8 +3,11 @@ language: go
 go:
   - 1.2
 
+script:
+  - go build -ldflags "-X main.version $TRAVIS_BUILD_NUMBER"
+  - go test -v
+
 after_success:
-  - go build
   - tar cvzf "$ARTIFACT" bumper
   - git tag "$TRAVIS_BUILD_NUMBER"
 
