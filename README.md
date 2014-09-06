@@ -1,6 +1,8 @@
 Bumper
 ======
 
+[![Build Status](https://travis-ci.org/ldx/bumper.svg?branch=master)](https://travis-ci.org/ldx/bumper)
+
 Introduction
 ------------
 
