@@ -22,6 +22,8 @@ func FixRequest(req *http.Request, orig_uri string, addhdr bool) (err error) {
 		if err != nil {
 			return err
 		}
+		//log.Printf("Fixing request: %s -> %s\n",
+		//	req.URL.String(), uri.String())
 
 		req.URL = uri
 		req.RequestURI = ""
