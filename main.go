@@ -77,13 +77,29 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 	}
 
 	cli := conn.RemoteAddr().String()
+	clireader := bufio.NewReader(conn)
+	cliwriter := io.Writer(conn)
 
-	reader := bufio.NewReader(conn)
-	writer := io.Writer(conn)
+	var err error
+	var proxyconn net.Conn
+	var proxyreader *bufio.Reader
+	var proxywriter io.Writer
+	if bumper.proxy != "" {
+		proxyconn, err = net.Dial("tcp", bumper.proxy)
+		if err != nil {
+			SendResp(cli, cliwriter, 502,
+				fmt.Sprintf("error connecting to parent proxy '%s': %s",
+					bumper.proxy, err), false)
+			return
+		}
+		defer proxyconn.Close()
+		proxyreader = bufio.NewReader(proxyconn)
+		proxywriter = io.Writer(proxyconn)
+	}
 
 	orig_uri := ""
 	for {
-		req, err := http.ReadRequest(reader)
+		req, err := http.ReadRequest(clireader)
 		if err == io.EOF {
 			log.Printf("(%s) client closed connection\n", cli)
 			return
@@ -97,7 +113,7 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 
 		if req.Method == "CONNECT" {
 			if !strings.Contains(req.Host, ":") {
-				SendResp(cli, writer, 400,
+				SendResp(cli, cliwriter, 400,
 					fmt.Sprintf("invalid host '%s'", req.Host), false)
 				return
 			}
@@ -107,12 +123,12 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 			cert, err := GetCertificate(host, bumper)
 			if err != nil {
 				log.Printf("(%s) error getting new cert: %s\n", cli, err)
-				SendResp(cli, writer, 500, err.Error(), false)
+				SendResp(cli, cliwriter, 500, err.Error(), false)
 				return
 			}
 
 			// Okay, we are ready to start TLS.
-			SendResp(cli, writer, 200, "", true)
+			SendResp(cli, cliwriter, 200, "", true)
 
 			tlsconn, err := StartTls(conn, cert)
 			if err != nil {
@@ -121,8 +137,8 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 			}
 			defer tlsconn.Close()
 
-			reader = bufio.NewReader(tlsconn)
-			writer = io.Writer(tlsconn)
+			clireader = bufio.NewReader(tlsconn)
+			cliwriter = io.Writer(tlsconn)
 
 			orig_uri = req.RequestURI
 
@@ -130,32 +146,60 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 		}
 
 		if FixRequest(req, orig_uri, bumper.addorig) != nil {
-			log.Printf("(%s) invalid request URI %s\n", cli,
-				req.RequestURI)
+			log.Printf("(%s) invalid request URI %s\n", cli, req.RequestURI)
 			return
 		}
 
-		resp, err := tr.RoundTrip(req)
-		if err != nil {
-			statuscode := 502
-			if resp != nil {
-				statuscode = resp.StatusCode
+		var resp *http.Response
+		if bumper.proxy != "" {
+			req.WriteProxy(proxywriter)
+			resp, err = http.ReadResponse(proxyreader, req)
+			if err == io.ErrUnexpectedEOF && bumper.proxy != "" {
+				log.Printf("(%s) reconnecting to parent %s\n",
+					cli, bumper.proxy)
+				proxyconn.Close()
+				proxyconn, err = net.Dial("tcp", bumper.proxy)
+				if err != nil {
+					SendResp(cli, cliwriter, 502,
+						fmt.Sprintf("error connecting to parent '%s': %s",
+							bumper.proxy, err), false)
+					return
+				}
+				defer proxyconn.Close()
+				proxyreader = bufio.NewReader(proxyconn)
+				proxywriter = io.Writer(proxyconn)
+				req.WriteProxy(proxywriter)
+				resp, err = http.ReadResponse(proxyreader, req)
 			}
-			SendResp(cli, writer, statuscode, err.Error(), false)
+		} else {
+			resp, err = tr.RoundTrip(req)
+		}
+		if err != nil {
+			log.Printf("(%s) error reading response: %s\n", cli, err)
+			var statuscode int
+			if resp != nil {
+				log.Printf("(%s) response was: %s\n", cli, resp)
+				statuscode = resp.StatusCode
+			} else {
+				statuscode = 502
+			}
+			SendResp(cli, cliwriter, statuscode, err.Error(), false)
 			return
 		}
 
 		if FixResponse(resp) != nil {
 			log.Printf("(%s) error fixing Content-Lenght for %s: %s\n",
 				cli, req, err)
-			SendResp(cli, writer, 500, err.Error(), false)
+			SendResp(cli, cliwriter, 500, err.Error(), false)
 			return
 		}
 
-		resp.Write(writer)
+		resp.Write(cliwriter)
 
 		log.Printf("(%s) <- %s %s\n", cli, resp.Status, req.URL)
 		//resp.Write(os.Stdout)
+
+		resp.Body.Close()
 
 		if req.Close || resp.Close {
 			log.Printf("(%s) closing connection\n", cli)
