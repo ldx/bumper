@@ -1,5 +1,9 @@
 language: go
 
+branches:
+  except:
+    - /^[0-9]/
+
 go:
   - 1.2
 
