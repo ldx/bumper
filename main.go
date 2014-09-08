@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 //
@@ -24,6 +25,7 @@ type BumperProxy struct {
 	mutex      *sync.RWMutex
 	certdir    string
 	maxserial  int64
+	timeout    int64
 	proxy      string
 	skipverify bool
 	addorig    bool
@@ -57,6 +59,9 @@ func Loop(addr string, bumper *BumperProxy) {
 //
 func HandleClient(conn net.Conn, bumper *BumperProxy) {
 	defer conn.Close()
+
+	conn.SetReadDeadline(
+		time.Now().Add(time.Duration(bumper.timeout) * time.Second))
 
 	var proxy func(*http.Request) (*url.URL, error) = nil
 	if bumper.proxy != "" {
@@ -218,6 +223,7 @@ var opts struct {
 	Proxy       string `short:"p" long:"proxy" value-name:"<host:port>" description:"HTTP parent proxy to use for all requests (both HTTP and HTTPS)."`
 	SkipVerify  bool   `short:"n" long:"skipverify" description:"If set, BumperProxy will not verify the certificate of HTTPS websites." default:"false"`
 	Listen      string `short:"l" long:"listen" value-name:"<host:port>" description:"Host and port where Bumperproxy will be listening." default:"localhost:9718"`
+	Timeout     int64  `short:"t" long:"timeout" value-name:"<seconds>" description:"Timeout for client connections." default:"120"`
 	AddXOrigUri bool   `short:"x" long:"addxoriguri" description:"If set, BumperProxy will add an X-Orig-Uri header with the original URI to requests." default:"false"`
 	Verbose     []bool `short:"v" long:"verbose" description:"Enable verbose debugging."`
 	Version     bool   `short:"V" long:"version" description:"Show version."`
@@ -234,6 +240,7 @@ func main() {
 		fmt.Printf("Bumper version %s\n", version)
 	}
 	if err != nil {
+		fmt.Printf("Error %s\n", err)
 		if len(args) == 1 && args[0] == "--help" {
 			os.Exit(0)
 		} else {
@@ -249,6 +256,7 @@ func main() {
 	bumper.proxy = opts.Proxy
 	bumper.addorig = opts.AddXOrigUri
 	bumper.skipverify = opts.SkipVerify
+	bumper.timeout = opts.Timeout
 
 	// Load CA certificate and key.
 	cacert, err := ReadCert(opts.CaCert, opts.CaKey)
