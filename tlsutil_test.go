@@ -55,7 +55,7 @@ func TestStartTls(t *testing.T) {
 		if err != nil {
 			t.Error(fmt.Sprintf("Accepting client: %s\n", err))
 		}
-		tlsconn, err := StartTls(conn, cert)
+		tlsconn, err := StartTls(newBufferedConn(conn), cert)
 
 		reader := bufio.NewReader(tlsconn)
 		writer := io.Writer(tlsconn)

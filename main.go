@@ -31,6 +31,14 @@ type BumperProxy struct {
 	addorig    bool
 }
 
+type Proxy struct {
+	proxy     string
+	conn      net.Conn
+	reader    *bufio.Reader
+	writer    io.Writer
+	isconnect bool
+}
+
 //
 // Main listener loop.
 //
@@ -54,52 +62,166 @@ func Loop(addr string, bumper *BumperProxy) {
 	}
 }
 
-//
-// Goroutine handling a client, proxying requests and responses.
-//
-func HandleClient(conn net.Conn, bumper *BumperProxy) {
-	defer conn.Close()
+func doStream(r *bufio.Reader, w io.Writer) <-chan error {
+	errCh := make(chan (error))
 
-	conn.SetReadDeadline(
-		time.Now().Add(time.Duration(bumper.timeout) * time.Second))
-
-	var proxy func(*http.Request) (*url.URL, error) = nil
-	if bumper.proxy != "" {
-		proxyurl, err := url.Parse("http://" + bumper.proxy)
-		if err != nil {
-			log.Printf("Setting parent proxy to %s: %s\n",
-				bumper.proxy, err)
-			return
+	go func() {
+		for {
+			buf := make([]byte, 8192)
+			n, err := r.Read(buf)
+			if n > 0 {
+				w.Write(buf[:n])
+			}
+			if err != nil {
+				errCh <- err
+				return
+			}
 		}
-		proxy = http.ProxyURL(proxyurl)
+	}()
+
+	return errCh
+}
+
+//
+// Connect to other side and stream all data sent/received.
+//
+func streamData(cli string,
+	clireader *bufio.Reader, cliwriter io.Writer,
+	srvreader *bufio.Reader, srvwriter io.Writer) {
+	c2sch := doStream(clireader, srvwriter)
+	s2cch := doStream(srvreader, cliwriter)
+
+	log.Printf("(%s) streaming data\n", cli)
+
+	select {
+	case err1 := <-c2sch:
+		log.Printf("(%s) -> %s", cli, err1)
+	case err2 := <-s2cch:
+		log.Printf("(%s) <- %s", cli, err2)
+	}
+}
+
+//
+// Connect to 'host' and stream all data sent/received.
+//
+func streamDataToServer(cli string, clireader *bufio.Reader,
+	cliwriter io.Writer, host string) {
+	if host == "" {
+		log.Printf("(%s) error, missing host header\n", cli)
+		return
+	}
+
+	conn, err := net.Dial("tcp", host)
+	if conn == nil {
+		log.Printf("(%s) error connecting to '%s': %s\n", cli, host, err)
+		return
+	}
+
+	r := bufio.NewReader(conn)
+	w := io.Writer(conn)
+
+	streamData(cli, clireader, cliwriter, r, w)
+}
+
+//
+// Connect to parent proxy.
+//
+func connectToProxy(cli string, proxy *Proxy) error {
+	log.Printf("(%s) connecting to parent proxy '%s'\n", cli, proxy.proxy)
+	var err error
+	proxy.conn, err = net.Dial("tcp", proxy.proxy)
+	if err != nil {
+		log.Printf("(%s) error connecting to parent proxy '%s': %s\n",
+			cli, proxy.proxy, err)
+		return err
+	}
+
+	proxy.reader = bufio.NewReader(proxy.conn)
+	proxy.writer = io.Writer(proxy.conn)
+
+	return nil
+}
+
+func proxyRoundTrip(cli string, req *http.Request,
+	proxy *Proxy) (*http.Response, error) {
+	log.Printf("(%s) request: %s %s\n", cli, req.RequestURI, req.Header)
+	if proxy.isconnect {
+		req.Write(proxy.writer)
+	} else {
+		req.WriteProxy(proxy.writer)
+	}
+
+	resp, err := http.ReadResponse(proxy.reader, req)
+	if err == io.ErrUnexpectedEOF && !proxy.isconnect {
+		// Try once more.
+		proxy.conn.Close()
+		err = connectToProxy(cli, proxy)
+		if err != nil {
+			return nil, err
+		}
+		req.WriteProxy(proxy.writer)
+		resp, err = http.ReadResponse(proxy.reader, req)
+	}
+
+	return resp, err
+}
+
+func newTransport(proxy string, skipverify bool) (*http.Transport, error) {
+	var proxyurl func(*http.Request) (*url.URL, error) = nil
+	if proxy != "" {
+		url, err := url.Parse("http://" + proxy)
+		if err != nil {
+			log.Printf("Error setting parent proxy to %s: %s\n",
+				proxy, err)
+			return nil, err
+		}
+		proxyurl = http.ProxyURL(url)
 	}
 
 	tr := &http.Transport{
-		Proxy: proxy,
+		Proxy: proxyurl,
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: bumper.skipverify,
+			InsecureSkipVerify: skipverify,
 		},
 	}
 
+	return tr, nil
+}
+
+//
+// Goroutine handling a client, proxying requests and responses.
+//
+func HandleClient(origconn net.Conn, bumper *BumperProxy) {
+	conn := newBufferedConn(origconn)
+	defer conn.Close()
+
 	cli := conn.RemoteAddr().String()
+	log.Printf("(%s) client connected\n", cli)
+
+	// Idle connections are closed after bumper.timeout seconds.
+	conn.SetReadDeadline(
+		time.Now().Add(time.Duration(bumper.timeout) * time.Second))
+
+	tr, err := newTransport(bumper.proxy, bumper.skipverify)
+	if err != nil {
+		return
+	}
+
 	clireader := bufio.NewReader(conn)
 	cliwriter := io.Writer(conn)
 
-	var err error
-	var proxyconn net.Conn
-	var proxyreader *bufio.Reader
-	var proxywriter io.Writer
+	var proxy *Proxy
 	if bumper.proxy != "" {
-		proxyconn, err = net.Dial("tcp", bumper.proxy)
+		proxy = &Proxy{}
+		proxy.proxy = bumper.proxy
+		err = connectToProxy(cli, proxy)
 		if err != nil {
 			SendResp(cli, cliwriter, 502,
 				fmt.Sprintf("error connecting to parent proxy '%s': %s",
 					bumper.proxy, err), false)
 			return
 		}
-		defer proxyconn.Close()
-		proxyreader = bufio.NewReader(proxyconn)
-		proxywriter = io.Writer(proxyconn)
+		defer proxy.conn.Close()
 	}
 
 	orig_uri := ""
@@ -137,17 +259,72 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 
 			tlsconn, err := StartTls(conn, cert)
 			if err != nil {
-				log.Printf("(%s) error starting TLS: %s\n", cli, err)
+				log.Printf("(%s) failed to start TLS: %s\n", cli, err)
 				return
+			} else if tlsconn == nil {
+				// This is not SSL/TLS. Start streaming.
+				log.Printf("(%s) streaming connection\n", cli)
+				if proxy != nil {
+					// Send CONNECT to parent proxy.
+					resp, err := proxyRoundTrip(cli, req, proxy)
+					if err != nil {
+						log.Printf("(%s) failed to CONNECT via parent: %s\n",
+							cli, err)
+					} else if resp.StatusCode != 200 {
+						log.Printf("(%s) failed to CONNECT via parent: %d\n",
+							cli, resp.StatusCode)
+					} else {
+						streamData(cli, clireader, cliwriter, proxy.reader,
+							proxy.writer)
+					}
+					return
+				} else {
+					// Direct connection to server.
+					streamDataToServer(cli, clireader, cliwriter, req.Host)
+					return
+				}
+			} else {
+				orig_uri = req.RequestURI
+
+				defer tlsconn.Close()
+				clireader = bufio.NewReader(tlsconn)
+				cliwriter = io.Writer(tlsconn)
+
+				if proxy != nil {
+					// Send CONNECT to parent proxy.
+					resp, err := proxyRoundTrip(cli, req, proxy)
+					if err != nil {
+						log.Printf("(%s) failed to CONNECT via parent: %s\n",
+							cli, err)
+					} else if resp.StatusCode != 200 {
+						log.Printf("(%s) failed to CONNECT via parent: %d\n",
+							cli, resp.StatusCode)
+					}
+					log.Printf("(%s) sent CONNECT to parent proxy\n", cli)
+
+					// Start TLS to server.
+					config := &tls.Config{
+						ServerName:         host,
+						InsecureSkipVerify: bumper.skipverify,
+					}
+					proxytlsconn := tls.Client(proxy.conn, config)
+					err = proxytlsconn.Handshake()
+					if err != nil {
+						log.Printf("(%s) SSL error after CONNECT to %s: %s\n",
+							cli, host, err)
+						return
+					}
+					proxy.conn = proxytlsconn
+					proxy.reader = bufio.NewReader(proxy.conn)
+					proxy.writer = io.Writer(proxy.conn)
+					proxy.isconnect = true
+					log.Printf("(%s) started SSL via parent proxy\n", cli)
+
+					// Don't fix up relative request URLs in this connection.
+					orig_uri = ""
+				}
+				continue
 			}
-			defer tlsconn.Close()
-
-			clireader = bufio.NewReader(tlsconn)
-			cliwriter = io.Writer(tlsconn)
-
-			orig_uri = req.RequestURI
-
-			continue
 		}
 
 		if FixRequest(req, orig_uri, bumper.addorig) != nil {
@@ -156,26 +333,8 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 		}
 
 		var resp *http.Response
-		if bumper.proxy != "" {
-			req.WriteProxy(proxywriter)
-			resp, err = http.ReadResponse(proxyreader, req)
-			if err == io.ErrUnexpectedEOF && bumper.proxy != "" {
-				log.Printf("(%s) reconnecting to parent %s\n",
-					cli, bumper.proxy)
-				proxyconn.Close()
-				proxyconn, err = net.Dial("tcp", bumper.proxy)
-				if err != nil {
-					SendResp(cli, cliwriter, 502,
-						fmt.Sprintf("error connecting to parent '%s': %s",
-							bumper.proxy, err), false)
-					return
-				}
-				defer proxyconn.Close()
-				proxyreader = bufio.NewReader(proxyconn)
-				proxywriter = io.Writer(proxyconn)
-				req.WriteProxy(proxywriter)
-				resp, err = http.ReadResponse(proxyreader, req)
-			}
+		if proxy != nil {
+			resp, err = proxyRoundTrip(cli, req, proxy)
 		} else {
 			resp, err = tr.RoundTrip(req)
 		}
@@ -199,16 +358,22 @@ func HandleClient(conn net.Conn, bumper *BumperProxy) {
 			return
 		}
 
-		resp.Write(cliwriter)
-
 		log.Printf("(%s) <- %s %s\n", cli, resp.Status, req.URL)
-		//resp.Write(os.Stdout)
-
+		resp.Write(cliwriter)
 		resp.Body.Close()
 
 		if req.Close || resp.Close {
 			log.Printf("(%s) closing connection\n", cli)
 			return
+		} else if resp.StatusCode == 101 {
+			// Upgrade connection, probably websocket.
+			if proxy != nil {
+				streamData(cli, clireader, cliwriter, proxy.reader,
+					proxy.writer)
+			} else {
+				//XXX: make this work for direct connections. However, we need
+				//the underlying net.Conn of the transport for streaming.
+			}
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"crypto/rsa"
 	_ "crypto/sha512"
@@ -18,17 +19,43 @@ import (
 	"time"
 )
 
-func StartTls(conn net.Conn, cert *tls.Certificate) (tlsconn *tls.Conn,
+func isHandshake(reader *bufio.Reader) (bool, error) {
+	buf, err := reader.Peek(9)
+	if err != nil {
+		log.Printf("failed to peek into CONNECT stream: %s\n", err)
+		return false, err
+	}
+	if len(buf) < 9 {
+		return false, nil
+	}
+
+	//log.Printf("%02x %02x %02x %02x\n", buf[0], buf[1], buf[2], buf[3])
+	//log.Printf("%02x %02x %02x %02x\n", buf[4], buf[5], buf[6], buf[7])
+
+	if buf[0] == 0x16 && buf[1] == 0x03 && buf[2] >= 0x00 && buf[2] <= 0x03 &&
+		buf[5] == 0x01 {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func StartTls(conn BufferedConn, cert *tls.Certificate) (tlsconn *tls.Conn,
 	err error) {
+	isTls, err := isHandshake(conn.r)
+	if !isTls {
+		return nil, err
+	}
+
 	config := &tls.Config{
 		NextProtos:   []string{"HTTP/1.1"},
 		Certificates: []tls.Certificate{*cert},
 	}
 
 	tlsconn = tls.Server(conn, config)
-	tlsconn.Handshake()
+	err = tlsconn.Handshake()
 
-	return tlsconn, nil
+	return tlsconn, err
 }
 
 func GetCertificate(name string, bumper *BumperProxy) (cert *tls.Certificate,
