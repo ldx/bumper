@@ -42,7 +42,7 @@ type Proxy struct {
 //
 // Main listener loop.
 //
-func Loop(addr string, bumper *BumperProxy) {
+func loop(addr string, bumper *BumperProxy) {
 	log.Printf("Starting listener on %s\n", addr)
 
 	srv, err := net.Listen("tcp", addr)
@@ -58,7 +58,7 @@ func Loop(addr string, bumper *BumperProxy) {
 			continue
 		}
 
-		go HandleClient(conn, bumper)
+		go handleClient(conn, bumper)
 	}
 }
 
@@ -191,7 +191,7 @@ func newTransport(proxy string, skipverify bool) (*http.Transport, error) {
 //
 // Goroutine handling a client, proxying requests and responses.
 //
-func HandleClient(origconn net.Conn, bumper *BumperProxy) {
+func handleClient(origconn net.Conn, bumper *BumperProxy) {
 	conn := newBufferedConn(origconn)
 	defer conn.Close()
 
@@ -448,5 +448,5 @@ func main() {
 
 	bumper.mutex = new(sync.RWMutex)
 
-	Loop(opts.Listen, bumper)
+	loop(opts.Listen, bumper)
 }
