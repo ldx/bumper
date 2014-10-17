@@ -236,7 +236,6 @@ func handleClient(origconn net.Conn, bumper *BumperProxy) {
 		}
 
 		log.Printf("(%s) -> %s %s\n", cli, req.Method, req.RequestURI)
-		//req.Write(os.Stdout)
 
 		if req.Method == "CONNECT" {
 			if !strings.Contains(req.Host, ":") {
@@ -371,8 +370,9 @@ func handleClient(origconn net.Conn, bumper *BumperProxy) {
 				streamData(cli, clireader, cliwriter, proxy.reader,
 					proxy.writer)
 			} else {
-				//XXX: make this work for direct connections. However, we need
-				//the underlying net.Conn of the transport for streaming.
+				// XXX: make this work for direct connections. However, we
+				// need the underlying net.Conn of the transport for
+				// streaming.
 			}
 		}
 	}
