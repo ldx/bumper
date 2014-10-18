@@ -198,10 +198,6 @@ func handleClient(origconn net.Conn, bumper *BumperProxy) {
 	cli := conn.RemoteAddr().String()
 	log.Printf("(%s) client connected\n", cli)
 
-	// Idle connections are closed after bumper.timeout seconds.
-	conn.SetReadDeadline(
-		time.Now().Add(time.Duration(bumper.timeout) * time.Second))
-
 	tr, err := newTransport(bumper.proxy, bumper.skipverify)
 	if err != nil {
 		return
@@ -226,6 +222,10 @@ func handleClient(origconn net.Conn, bumper *BumperProxy) {
 
 	orig_uri := ""
 	for {
+		// Idle connections are closed after bumper.timeout seconds.
+		conn.SetReadDeadline(
+			time.Now().Add(time.Duration(bumper.timeout) * time.Second))
+
 		req, err := http.ReadRequest(clireader)
 		if err == io.EOF {
 			log.Printf("(%s) client closed connection\n", cli)
