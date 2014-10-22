@@ -274,12 +274,14 @@ func handleClient(origconn net.Conn, bumper *BumperProxy) {
 						log.Printf("(%s) failed to CONNECT via parent: %d\n",
 							cli, resp.StatusCode)
 					} else {
+						conn.SetReadDeadline(time.Time{})
 						streamData(cli, clireader, cliwriter, proxy.reader,
 							proxy.writer)
 					}
 					return
 				} else {
 					// Direct connection to server.
+					conn.SetReadDeadline(time.Time{})
 					streamDataToServer(cli, clireader, cliwriter, req.Host)
 					return
 				}
@@ -368,6 +370,7 @@ func handleClient(origconn net.Conn, bumper *BumperProxy) {
 		} else if resp.StatusCode == 101 {
 			// Upgrade connection, probably websocket.
 			if proxy != nil {
+				conn.SetReadDeadline(time.Time{})
 				streamData(cli, clireader, cliwriter, proxy.reader,
 					proxy.writer)
 			} else {
