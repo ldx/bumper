@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"github.com/elazarl/goproxy"
 	"io"
 	"io/ioutil"
 	"log"
@@ -15,12 +16,12 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	io.WriteString(w, "Hello world!\n")
 }
 
-func createConfig(certfile string, keyfile string) (bumper *BumperProxy,
-	err error) {
+func createConfig(certfile string, keyfile string, parent string) (
+	bumper *BumperProxy, err error) {
 	bumper = new(BumperProxy)
 
 	// Sensible defaults.
-	bumper.proxy = ""
+	bumper.proxy = parent
 	bumper.addorig = false
 	bumper.skipverify = true
 	bumper.timeout = 60
@@ -46,7 +47,8 @@ func createConfig(certfile string, keyfile string) (bumper *BumperProxy,
 	return bumper, nil
 }
 
-func proxyViaBumper(t *testing.T, listener net.Listener, url string) *http.Response {
+func proxyViaBumper(t *testing.T, listener net.Listener, url string,
+	parent string) *http.Response {
 	go func() {
 		http.Serve(listener, http.HandlerFunc(handler))
 	}()
@@ -63,7 +65,8 @@ func proxyViaBumper(t *testing.T, listener net.Listener, url string) *http.Respo
 			t.Error("Accept: ", err)
 		}
 
-		bumper, err := createConfig("cybervillains.crt", "cybervillains.key")
+		bumper, err := createConfig("cybervillains.crt", "cybervillains.key",
+			parent)
 		if err != nil {
 			t.Error("createConfig: ", err)
 		}
@@ -77,7 +80,8 @@ func proxyViaBumper(t *testing.T, listener net.Listener, url string) *http.Respo
 	}
 
 	client := &http.Client{Transport: tr}
-	resp, err := client.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	resp, err := client.Transport.RoundTrip(req)
 	if err != nil {
 		t.Error("RoundTrip: ", err)
 	}
@@ -88,7 +92,7 @@ func proxyViaBumper(t *testing.T, listener net.Listener, url string) *http.Respo
 	return resp
 }
 
-func TestHttp(t *testing.T) {
+func doTestHttp(t *testing.T, parenthostport string) {
 	log.SetOutput(noLog{})
 
 	hostport := "localhost:12345"
@@ -99,10 +103,10 @@ func TestHttp(t *testing.T) {
 	}
 	defer listener.Close()
 
-	proxyViaBumper(t, listener, "http://"+hostport)
+	proxyViaBumper(t, listener, "http://"+hostport, parenthostport)
 }
 
-func TestHttps(t *testing.T) {
+func doTestHttps(t *testing.T, parent string) {
 	log.SetOutput(noLog{})
 
 	hostport := "localhost:12345"
@@ -121,11 +125,60 @@ func TestHttps(t *testing.T) {
 
 	listener := tls.NewListener(plainlistener, tlsconfig)
 
-	resp := proxyViaBumper(t, listener, "https://"+hostport)
+	resp := proxyViaBumper(t, listener, "https://"+hostport, parent)
 	issuer := resp.TLS.PeerCertificates[0].Issuer
 	if issuer.Country[0] != "US" ||
 		issuer.Organization[0] != "CyberVillians.com" ||
 		issuer.OrganizationalUnit[0] != "CyberVillians Certification Authority" {
 		t.Error("Invalid issuer in peer certificate: ", issuer)
 	}
+}
+
+func newParentProxy(hostport string) (net.Listener, error) {
+	listener, err := net.Listen("tcp", hostport)
+	if err != nil {
+		return nil, err
+	}
+
+	parent := goproxy.NewProxyHttpServer()
+	parent.Verbose = false
+	go func() {
+		http.Serve(listener, parent)
+	}()
+
+	return listener, nil
+}
+
+func TestHttp(t *testing.T) {
+	doTestHttp(t, "")
+}
+
+func TestHttps(t *testing.T) {
+	doTestHttps(t, "")
+}
+
+func TestHttpParentproxy(t *testing.T) {
+	log.SetOutput(noLog{})
+
+	parent := "localhost:12344"
+	listener, err := newParentProxy(parent)
+	if err != nil {
+		t.Error("Listen: ", err)
+	}
+	defer listener.Close()
+
+	doTestHttp(t, parent)
+}
+
+func TestHttpsParentproxy(t *testing.T) {
+	log.SetOutput(noLog{})
+
+	parent := "localhost:12344"
+	listener, err := newParentProxy(parent)
+	if err != nil {
+		t.Error("Listen: ", err)
+	}
+	defer listener.Close()
+
+	doTestHttps(t, parent)
 }
