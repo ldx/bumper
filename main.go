@@ -171,6 +171,7 @@ func proxyRoundTrip(cli string, req *http.Request,
 	resp, err := http.ReadResponse(proxy.reader, req)
 	if err == io.ErrUnexpectedEOF && !proxy.isconnect {
 		// Try once more.
+		log.Printf("(%s) proxy connection has been closed, retrying\n", cli)
 		proxy.conn.Close()
 		err = connectToProxy(cli, proxy)
 		if err != nil {
