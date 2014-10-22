@@ -127,7 +127,6 @@ func streamDataToServer(cli string, clireader *bufio.Reader,
 // Connect to parent proxy.
 //
 func connectToProxy(cli string, proxy *Proxy) error {
-	log.Printf("(%s) connecting to parent proxy '%s'\n", cli, proxy.proxy)
 	var err error
 	proxy.conn, err = net.Dial("tcp", proxy.proxy)
 	if err != nil {
@@ -135,6 +134,8 @@ func connectToProxy(cli string, proxy *Proxy) error {
 			cli, proxy.proxy, err)
 		return err
 	}
+	log.Printf("(%s) connected to parent proxy, %s<->%s\n",
+		cli, proxy.conn.LocalAddr(), proxy.proxy)
 
 	proxy.reader = bufio.NewReader(proxy.conn)
 	proxy.writer = io.Writer(proxy.conn)
