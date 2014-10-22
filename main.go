@@ -315,39 +315,6 @@ func handleClient(origconn net.Conn, bumper *BumperProxy) {
 				clireader = bufio.NewReader(tlsconn)
 				cliwriter = io.Writer(tlsconn)
 
-				if proxy != nil {
-					// Send CONNECT to parent proxy.
-					resp, err := proxyRoundTrip(cli, req, proxy)
-					if err != nil {
-						log.Printf("(%s) failed to CONNECT via parent: %s\n",
-							cli, err)
-					} else if resp.StatusCode != 200 {
-						log.Printf("(%s) failed to CONNECT via parent: %d\n",
-							cli, resp.StatusCode)
-					}
-					log.Printf("(%s) sent CONNECT to parent proxy\n", cli)
-
-					// Start TLS to server.
-					config := &tls.Config{
-						ServerName:         host,
-						InsecureSkipVerify: bumper.skipverify,
-					}
-					proxytlsconn := tls.Client(proxy.conn, config)
-					err = proxytlsconn.Handshake()
-					if err != nil {
-						log.Printf("(%s) SSL error after CONNECT to %s: %s\n",
-							cli, host, err)
-						return
-					}
-					proxy.conn = proxytlsconn
-					proxy.reader = bufio.NewReader(proxy.conn)
-					proxy.writer = io.Writer(proxy.conn)
-					proxy.isconnect = true
-					log.Printf("(%s) started SSL via parent proxy\n", cli)
-
-					// Don't fix up relative request URLs in this connection.
-					orig_uri = ""
-				}
 				continue
 			}
 		}
