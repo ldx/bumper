@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"github.com/jessevdk/go-flags"
 	"io"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -146,10 +148,24 @@ func connectToProxy(cli string, proxy *Proxy) error {
 func proxyRoundTrip(cli string, req *http.Request,
 	proxy *Proxy) (*http.Response, error) {
 	log.Printf("(%s) request: %s %s\n", cli, req.RequestURI, req.Header)
+
+	// Save the body in case we need to reconnect.
+	body, err := ioutil.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	b := make([]byte, len(body))
+	copy(b, body)
+	req.Body = ioutil.NopCloser(bytes.NewReader(b))
+
 	if proxy.isconnect {
-		req.Write(proxy.writer)
+		if err := req.Write(proxy.writer); err != nil {
+			return nil, err
+		}
 	} else {
-		req.WriteProxy(proxy.writer)
+		if err := req.WriteProxy(proxy.writer); err != nil {
+			return nil, err
+		}
 	}
 
 	resp, err := http.ReadResponse(proxy.reader, req)
@@ -160,7 +176,13 @@ func proxyRoundTrip(cli string, req *http.Request,
 		if err != nil {
 			return nil, err
 		}
-		req.WriteProxy(proxy.writer)
+
+		b = make([]byte, len(body))
+		copy(b, body)
+		req.Body = ioutil.NopCloser(bytes.NewReader(b))
+		if err = req.WriteProxy(proxy.writer); err != nil {
+			return nil, err
+		}
 		resp, err = http.ReadResponse(proxy.reader, req)
 	}
 
