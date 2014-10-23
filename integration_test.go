@@ -47,20 +47,14 @@ func createConfig(certfile string, keyfile string, parent string) (
 	return bumper, nil
 }
 
-func proxyViaBumper(t *testing.T, listener net.Listener, url string,
-	parent string) *http.Response {
-	go func() {
-		http.Serve(listener, http.HandlerFunc(handler))
-	}()
-
-	bumpersrv, err := net.Listen("tcp", "localhost:12346")
+func startBumper(t *testing.T, addr string, parent string) net.Listener {
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Error("Listen: ", err)
 	}
-	defer bumpersrv.Close()
 
 	go func() {
-		conn, err := bumpersrv.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
 			t.Error("Accept: ", err)
 		}
@@ -74,7 +68,11 @@ func proxyViaBumper(t *testing.T, listener net.Listener, url string,
 		handleClient(conn, bumper)
 	}()
 
-	tr, err := newTransport("localhost:12346", true)
+	return listener
+}
+
+func proxyVia(t *testing.T, url string, proxy string) *http.Response {
+	tr, err := newTransport(proxy, true)
 	if err != nil {
 		t.Error("newTransport: ", err)
 	}
@@ -92,26 +90,34 @@ func proxyViaBumper(t *testing.T, listener net.Listener, url string,
 	return resp
 }
 
-func doTestHttp(t *testing.T, parenthostport string) {
+func doTestHttp(t *testing.T, parent string) {
 	log.SetOutput(noLog{})
 
-	hostport := "localhost:12345"
+	addr := "localhost:12345"
 
-	listener, err := net.Listen("tcp", hostport)
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Error("Listen: ", err)
 	}
 	defer listener.Close()
 
-	proxyViaBumper(t, listener, "http://"+hostport, parenthostport)
+	go func() {
+		http.Serve(listener, http.HandlerFunc(handler))
+	}()
+
+	bumperaddr := "localhost:12346"
+	bumperlistener := startBumper(t, bumperaddr, parent)
+	defer bumperlistener.Close()
+
+	proxyVia(t, "http://"+addr, bumperaddr)
 }
 
 func doTestHttps(t *testing.T, parent string) {
 	log.SetOutput(noLog{})
 
-	hostport := "localhost:12345"
+	addr := "localhost:12345"
 
-	plainlistener, err := net.Listen("tcp", hostport)
+	plainlistener, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Error("Listen: ", err)
 	}
@@ -124,8 +130,15 @@ func doTestHttps(t *testing.T, parent string) {
 	}
 
 	listener := tls.NewListener(plainlistener, tlsconfig)
+	go func() {
+		http.Serve(listener, http.HandlerFunc(handler))
+	}()
 
-	resp := proxyViaBumper(t, listener, "https://"+hostport, parent)
+	bumperaddr := "localhost:12346"
+	bumperlistener := startBumper(t, bumperaddr, parent)
+	defer bumperlistener.Close()
+
+	resp := proxyVia(t, "https://"+addr, bumperaddr)
 	issuer := resp.TLS.PeerCertificates[0].Issuer
 	if issuer.Country[0] != "US" ||
 		issuer.Organization[0] != "CyberVillians.com" ||
@@ -134,8 +147,8 @@ func doTestHttps(t *testing.T, parent string) {
 	}
 }
 
-func newParentProxy(hostport string) (net.Listener, error) {
-	listener, err := net.Listen("tcp", hostport)
+func startParentProxy(addr string) (net.Listener, error) {
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +174,7 @@ func TestHttpParentproxy(t *testing.T) {
 	log.SetOutput(noLog{})
 
 	parent := "localhost:12344"
-	listener, err := newParentProxy(parent)
+	listener, err := startParentProxy(parent)
 	if err != nil {
 		t.Error("Listen: ", err)
 	}
@@ -174,7 +187,7 @@ func TestHttpsParentproxy(t *testing.T) {
 	log.SetOutput(noLog{})
 
 	parent := "localhost:12344"
-	listener, err := newParentProxy(parent)
+	listener, err := startParentProxy(parent)
 	if err != nil {
 		t.Error("Listen: ", err)
 	}
