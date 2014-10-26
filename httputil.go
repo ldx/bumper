@@ -36,7 +36,9 @@ func FixRequest(req *http.Request, orig_uri string, addhdr bool) (err error) {
 	keepalive := req.Header.Get("Proxy-Connection")
 	if keepalive != "" {
 		req.Header.Del("Proxy-Connection")
-		req.Header.Set("Connection", keepalive)
+		if req.Header.Get("Connection") == "" {
+			req.Header.Set("Connection", keepalive)
+		}
 	}
 
 	return nil
