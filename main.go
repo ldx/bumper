@@ -310,7 +310,9 @@ func handleClient(origconn net.Conn, bumper *BumperProxy) {
 				}
 			} else {
 				orig_uri = req.RequestURI
-
+				if strings.HasSuffix(orig_uri, ":443") {
+					orig_uri = orig_uri[:len(orig_uri)-4]
+				}
 				defer tlsconn.Close()
 				clireader = bufio.NewReader(tlsconn)
 				cliwriter = io.Writer(tlsconn)
